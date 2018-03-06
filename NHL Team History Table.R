@@ -14,7 +14,7 @@ teamId <- 18;	# 18 = Nashville Predators on nhl.com/stats
 colors <- c("253,187,48", "0,45,98");
 
 startYear <- 1998;
-endYear <- 2016;
+endYear <- 2018;
 
 urlBase <- "http://www.nhl.com/stats/rest/";
 
@@ -47,11 +47,14 @@ gameTypes <- data.frame(
 
 startSeasonId <- paste(startYear, startYear + 1, sep = "");
 endSeasonId <- paste(endYear, endYear + 1, sep = "");
-seasonsUrl <- paste(urlBase, "grouped/teams/season/teamsummary?cayenneExp=seasonId%3E=", startSeasonId, "%20and%20seasonId%3C=", endSeasonId, "%20and%20gameTypeId=", regularSeasonGameTypeId, "%20and%20teamId=", teamId, sep="");
+seasonsUrl <- paste(urlBase, "team?isAggregate=false&reportType=basic&isGame=false&reportName=teamsummary&cayenneExp=seasonId%3E=", startSeasonId, "%20and%20seasonId%3C=", endSeasonId, "%20and%20gameTypeId=", regularSeasonGameTypeId, "%20and%20teamId=", teamId, sep="");
 seasons <- fromJSON(seasonsUrl)$data;
 seasons$startYear <- as.integer(substr(seasons$seasonId, 1, 4));
 teamFullName <- seasons$teamFullName[1];
 
+if (any(is.na(seasons$otLosses)) == TRUE) {
+  seasons[which(is.na(seasons$otLosses)), ]$otLosses <- 0;
+}
 
 
 ### Function that will get all player data from the NHL
@@ -59,7 +62,7 @@ teamFullName <- seasons$teamFullName[1];
 getNhlPlayerData <- function(gameTypeId, playersType, teamId) {
   output <- data.frame();
   
-  url <- paste(urlBase, "individual/", playersType, "/season/bios?cayenneExp=seasonId%3E=", startSeasonId, "%20and%20seasonId%3C=", endSeasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
+  url <- paste(urlBase, playersType, "?isAggregate=false&reportType=basic&isGame=false&reportName=skatersummary&cayenneExp=seasonId%3E=", startSeasonId, "%20and%20seasonId%3C=", endSeasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
   x <- fromJSON(url);
   
   if (x$total > 0) {
@@ -91,7 +94,7 @@ goalies <- getNhlPlayerDataForAllGameTypes("goalies", teamId);
 ### (Based on the last year we're examining.  Will have to modify if a team relocates.)
 
 lastSeasonId <- seasons[nrow(seasons), ]$seasonId;
-teamsUrl <- paste(urlBase, "grouped/teams/season/teamsummary?cayenneExp=seasonId=", lastSeasonId, "%20and%20gameTypeId=2", sep="");
+teamsUrl <- paste(urlBase, "team?isAggregate=false&reportType=basic&isGame=false&reportName=teamsummary&cayenneExp=seasonId=", lastSeasonId, "%20and%20gameTypeId=2", sep="");
 teams <- fromJSON(teamsUrl)$data;
 
 
@@ -102,7 +105,7 @@ teams <- fromJSON(teamsUrl)$data;
 getAllGamesOfTypePlayedByTeamInSeason <- function (seasonId, teamId, gameTypeId) {
   output <- data.frame();
   
-  url <- paste(urlBase, "grouped/teams/game/teamsummary?cayenneExp=seasonId=", seasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
+  url <- paste(urlBase, "team?isAggregate=false&reportType=basic&isGame=true&reportName=teamsummary&cayenneExp=seasonId=", seasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
   
   x <- fromJSON(url);
   
@@ -143,7 +146,7 @@ games <- getAllGamesPlayedByTeam(teamId);
 getStatsForPlayersOfTypeInGamesOfTypeForSeason <- function (gameTypeId, playersType, seasonId, teamId) {
   output <- data.frame();
   
-  url <- paste(urlBase, "grouped/", playersType, "/game/" , substr(playersType, 1, nchar(playersType) - 1), "summary?cayenneExp=seasonId=", seasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
+  url <- paste(urlBase, playersType, "?isAggregate=false&reportType=basic&isGame=true&reportName=", substr(playersType, 1, nchar(playersType) - 1), "summary&cayenneExp=seasonId=", seasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
   
   x <- fromJSON(url);
   
@@ -247,21 +250,48 @@ goalieSeasonToi <- computeSeasonToiRank(goalieStats, goalies);
 
 ### Build table with unique players
 
+columns <- c("playerId", "playerName", "playerFirstName", "playerLastName", "playerPositionCode", "playerHeight", "playerWeight", "playerShootsCatches", "playerBirthDate", "playerNationality", "playerBirthCity", "playerBirthStateProvince", "playerBirthCountry", "playerDraftOverallPickNo", "playerDraftRoundNo", "playerDraftYear", "playerTeamsPlayedFor", "seasonId");
+
 players <- merge(goalies, goalies %>%
                    filter(gameTypeId == regularSeasonGameTypeId) %>%
                    group_by(playerId, gameTypeId) %>%
                    summarize(seasonId = max(seasonId))
-                 )[ , c("playerId", "playerName", "playerFirstName", "playerLastName", "playerPositionCode", "playerCurrentSweaterNumber", "playerHeight", "playerWeight", "playerShootsCatches", "playerBirthDate", "playerNationality", "playerBirthCity", "playerBirthStateProvince", "playerBirthCountry", "playerDraftOverallPickNo", "playerDraftRoundNo", "playerDraftYear", "playerTeamsPlayedFor", "seasonId")];
+                 )[ , columns];
 
 players <- rbind(players,
                  merge(skaters, skaters %>%
                          filter(gameTypeId == regularSeasonGameTypeId) %>%
                          group_by(playerId, gameTypeId) %>%
                          summarize(seasonId = max(seasonId))
-                 )[ , c("playerId", "playerName", "playerFirstName", "playerLastName", "playerPositionCode", "playerCurrentSweaterNumber", "playerHeight", "playerWeight", "playerShootsCatches", "playerBirthDate", "playerNationality", "playerBirthCity", "playerBirthStateProvince", "playerBirthCountry", "playerDraftOverallPickNo", "playerDraftRoundNo", "playerDraftYear", "playerTeamsPlayedFor", "seasonId")]
-);
+                 )[ , columns]
+            );
 
-names(players) <- c("playerId", "name", "firstName", "lastName", "positionCode", "sweaterNumber", "height", "weight", "shootsCatches", "birthDate", "nationality", "birthCity", "birthStateProvince", "birthCountry", "draftOverallPickNo", "draftRoundNo", "draftYear", "teamsPlayedFor", "latestSeasonId");
+names(players) <- c("playerId", "name", "firstName", "lastName", "positionCode", "height", "weight", "shootsCatches", "birthDate", "nationality", "birthCity", "birthStateProvince", "birthCountry", "draftOverallPickNo", "draftRoundNo", "draftYear", "teamsPlayedFor", "latestSeasonId");
+
+
+# NHL API no longer provides the players' sweater numbers as part of its bio data.  So we have to use another API
+# to get that information.
+
+roster <- apply(seasons["seasonId"], 1, function (x) {
+              url <- paste0("https://statsapi.web.nhl.com/api/v1/teams/", teamId, "/roster?season=", x);
+              roster <- fromJSON(url)$roster;
+              roster <- flatten(roster);
+              roster$seasonId <- x;
+              roster
+           })
+
+roster <- do.call(rbind, roster);
+
+roster <- merge(roster, roster %>%
+                          group_by(person.id) %>%
+                          summarize(seasonId = max(seasonId)));
+
+# Merge the sweater number data into our "players" data frame
+players <- merge(players, roster %>% select(playerId = person.id, sweaterNumber = jerseyNumber), all.x = TRUE);
+
+if (any(is.na(players$sweaterNumber)) == TRUE) {
+  players[which(is.na(players$sweaterNumber)), ]$sweaterNumber <- "??";
+}
 
 
 
@@ -310,11 +340,11 @@ html <- c(html, paste("   <title>", teamFullName, " History</title>", sep = ""))
 html <- c(html, "   <style type=\"text/css\">");
 html <- c(html, "      table#teamHistoryTable {border-collapse: collapse; font-family: \"Segoe UI\"; border: 2pt solid #e0e0e0;}");
 html <- c(html, "      table#teamHistoryTable th, table#teamHistoryTable td {border-left: 1pt solid #e0e0e0;}");
-html <- c(html, "      table#teamHistoryTable thead tr th {width: 54pt; text-align: center; font-size: 1.1em;}");
+html <- c(html, "      table#teamHistoryTable thead tr th {min-width: 54pt; text-align: center; font-size: 1.1em;}");
 html <- c(html, "      table#teamHistoryTable tbody tr.summaries td {text-align: center; font-size: 0.75em;}");
 html <- c(html, "      table#teamHistoryTable tbody tr td.group-header {font-weight: bold; transform: rotate(-90deg); border-left: 2pt;}");
-html <- c(html, "      table#teamHistoryTable tbody tr td.sweater-number {width: 36pt; text-align: center;}");
-html <- c(html, "      table#teamHistoryTable tbody tr td.player-name    {width: 144pt; text-align: left;}");
+html <- c(html, "      table#teamHistoryTable tbody tr td.sweater-number {min-width: 36pt; text-align: center;}");
+html <- c(html, "      table#teamHistoryTable tbody tr td.player-name    {min-width: 144pt; text-align: left; white-space: nowrap;}");
 html <- c(html, "      table#teamHistoryTable tbody tr td {text-align: right; padding-right: 4pt;}");
 html <- c(html, "   </style>");
 html <- c(html, "</head>");
