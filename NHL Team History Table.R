@@ -9,176 +9,41 @@
 
 # Set variables that control how the script will operate
 
-teamId <- 18;	# 18 = Nashville Predators on nhl.com/stats
-
-colors <- c("253,187,48", "0,45,98");
-
-startYear <- 1998;
-endYear <- 2018;
-
-urlBase <- "http://www.nhl.com/stats/rest/";
+teamId <- 18;	# 18 = Nashville Predators on nhl.com/stats  (call "getLeagueHistorySummary()" to look up the ID for another team)
+colors <- c("253,187,48", "0,45,98");   # Hard-coding the colors to use in the final output (this is blue and gold for the Preds)
 
 
-
-
-library(jsonlite);
-library(dplyr);
+source("nhl-r.R")
 library(reshape2);
 
 
-
-
-### Build a list of game types
-### (this is static data that doesn't change)
-
-regularSeasonGameTypeId <- 2;
-playoffsGameTypeId <- 3;
-gameTypes <- data.frame(
-  gameTypeId = c(regularSeasonGameTypeId, playoffsGameTypeId),
-  name = c("Regular Season", "Playoffs"),
-  stringsAsFactors = FALSE
-);
-
-
-
+gameTypes <- buildGameTypes()
 
 ### Build a list of seasons for the specified team
-### (based on the startYear and endYear variables set above)
+seasons <- getTeamSeasonSummaries(teamId)
 
-startSeasonId <- paste(startYear, startYear + 1, sep = "");
-endSeasonId <- paste(endYear, endYear + 1, sep = "");
-seasonsUrl <- paste(urlBase, "team?isAggregate=false&reportType=basic&isGame=false&reportName=teamsummary&cayenneExp=seasonId%3E=", startSeasonId, "%20and%20seasonId%3C=", endSeasonId, "%20and%20gameTypeId=", regularSeasonGameTypeId, "%20and%20teamId=", teamId, sep="");
-seasons <- fromJSON(seasonsUrl)$data;
-seasons$startYear <- as.integer(substr(seasons$seasonId, 1, 4));
-teamFullName <- seasons$teamFullName[1];
+teamFullName <- seasons$teamFullName[nrow(seasons)];
 
 if (any(is.na(seasons$otLosses)) == TRUE) {
   seasons[which(is.na(seasons$otLosses)), ]$otLosses <- 0;
 }
 
-
-### Function that will get all player data from the NHL
-
-getNhlPlayerData <- function(gameTypeId, playersType, teamId) {
-  output <- data.frame();
-  
-  url <- paste(urlBase, playersType, "?isAggregate=false&reportType=basic&isGame=false&reportName=skatersummary&cayenneExp=seasonId%3E=", startSeasonId, "%20and%20seasonId%3C=", endSeasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
-  x <- fromJSON(url);
-  
-  if (x$total > 0) {
-    x$data$gameTypeId <- gameTypeId;
-    output <- rbind(output, x$data);
-  }
-  
-  return(output);
-}
-
-
-
-
-### Another function... this one just calls the previous function for each game type and combines the resulting data sets into one
-
-getNhlPlayerDataForAllGameTypes <- function(playersType, teamId) {
-  output <- apply(gameTypes["gameTypeId"], 1, function(x) getNhlPlayerData(x, playersType, teamId));
-  output <- do.call(rbind, output);
-  return(output);
-}
-
-skaters <- getNhlPlayerDataForAllGameTypes("skaters", teamId);
-goalies <- getNhlPlayerDataForAllGameTypes("goalies", teamId);
-
-
+# Get a season-by-season summary for every player that's ever played for the team
+skaters <- getTeamPlayersSummaryBySeason(teamId, "skaters");
+goalies <- getTeamPlayersSummaryBySeason(teamId, "goalies");
 
 
 ### Build a list of all of the teams in the league
-### (Based on the last year we're examining.  Will have to modify if a team relocates.)
-
-lastSeasonId <- seasons[nrow(seasons), ]$seasonId;
-teamsUrl <- paste(urlBase, "team?isAggregate=false&reportType=basic&isGame=false&reportName=teamsummary&cayenneExp=seasonId=", lastSeasonId, "%20and%20gameTypeId=2", sep="");
-teams <- fromJSON(teamsUrl)$data;
+teams <- getLeagueHistorySummary();
 
 
+### Get all of the games played by the specified team
+games <- getGameSummariesForTeam(teamId);
 
 
-### Create a set of functions that gets all of the games played by the specified team
-
-getAllGamesOfTypePlayedByTeamInSeason <- function (seasonId, teamId, gameTypeId) {
-  output <- data.frame();
-  
-  url <- paste(urlBase, "team?isAggregate=false&reportType=basic&isGame=true&reportName=teamsummary&cayenneExp=seasonId=", seasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
-  
-  x <- fromJSON(url);
-  
-  if (x$total > 0) {
-    x$data$seasonId <- seasonId;
-    x$data$gameTypeId <- gameTypeId;
-    output <- rbind(output, x$data);
-  }
-  
-  return(output);
-}
-
-getAllGamesPlayedByTeamInSeason <- function (seasonId, teamId) {
-  message(paste("Getting game data for season", seasonId));
-  flush.console();
-  Sys.sleep(1);
-  
-  output <- apply(gameTypes["gameTypeId"], 1, function(x) getAllGamesOfTypePlayedByTeamInSeason(seasonId, teamId, x));
-  output <- do.call(rbind, output);
-  
-  return(output);
-}  
-
-getAllGamesPlayedByTeam <- function(teamId) {
-  output <- apply(seasons["seasonId"], 1, function(x) getAllGamesPlayedByTeamInSeason(x, teamId));
-  output <- do.call(rbind, output);
-  
-  return(output);
-}
-
-games <- getAllGamesPlayedByTeam(teamId);
-
-
-
-
-### Create a set of functions to get all player stats in each game
-
-getStatsForPlayersOfTypeInGamesOfTypeForSeason <- function (gameTypeId, playersType, seasonId, teamId) {
-  output <- data.frame();
-  
-  url <- paste(urlBase, playersType, "?isAggregate=false&reportType=basic&isGame=true&reportName=", substr(playersType, 1, nchar(playersType) - 1), "summary&cayenneExp=seasonId=", seasonId, "%20and%20gameTypeId=", gameTypeId, "%20and%20teamId=", teamId, sep="");
-  
-  x <- fromJSON(url);
-  
-  if (x$total > 0) {
-    x$data$seasonId <- seasonId;
-    x$data$gameTypeId <- gameTypeId;
-    output <- rbind(output, x$data);
-  }
-  
-  return(output);
-}
-
-getStatsForPlayersOfTypeForSeason <- function(playersType, seasonId, teamId) {
-  message(paste("Getting", playersType, "data for season", seasonId));
-  flush.console();
-  Sys.sleep(1);
-  
-  output <- apply(gameTypes["gameTypeId"], 1, function(x) getStatsForPlayersOfTypeInGamesOfTypeForSeason(x, playersType, seasonId, teamId));
-  output <- do.call(rbind, output);
-  
-  return(output);
-}
-
-getStatsForPlayersOfType <- function(playersType, teamId) {
-  output <- apply(seasons["seasonId"], 1, function(x) getStatsForPlayersOfTypeForSeason(playersType, x, teamId));
-  output <- do.call(rbind, output);
-  
-  return(output);
-}
-
-skaterStats <- getStatsForPlayersOfType("skaters", teamId);
-goalieStats <- getStatsForPlayersOfType("goalies", teamId);
+### Get all player stats in each game
+skaterStats <- getPlayerGameDetails(teamId, "skaters");
+goalieStats <- getPlayerGameDetails(teamId, "goalies");
 
 
 ### Rename the "timeOnIcePerGame" column for skater stats so that it matches the column name for goalie stats
@@ -209,7 +74,6 @@ games[games$timeOnIce < 3600, ]$timeOnIce <- 3600;
 seasons <- merge(seasons, games %>%
                    group_by(seasonId) %>%
                    summarize(timeOnIce = sum(timeOnIce)));
-
 
 
 
@@ -246,8 +110,6 @@ goalieSeasonToi <- computeSeasonToiRank(goalieStats, goalies);
 
 
 
-
-
 ### Build table with unique players
 
 columns <- c("playerId", "playerName", "playerFirstName", "playerLastName", "playerPositionCode", "playerHeight", "playerWeight", "playerShootsCatches", "playerBirthDate", "playerNationality", "playerBirthCity", "playerBirthStateProvince", "playerBirthCountry", "playerDraftOverallPickNo", "playerDraftRoundNo", "playerDraftYear", "playerTeamsPlayedFor", "seasonId");
@@ -272,7 +134,7 @@ names(players) <- c("playerId", "name", "firstName", "lastName", "positionCode",
 # NHL API no longer provides the players' sweater numbers as part of its bio data.  So we have to use another API
 # to get that information.
 
-roster <- apply(seasons["seasonId"], 1, function (x) {
+roster <- lapply(seasons$seasonId, function (x) {
               url <- paste0("https://statsapi.web.nhl.com/api/v1/teams/", teamId, "/roster?season=", x);
               roster <- fromJSON(url)$roster;
               roster <- flatten(roster);
@@ -415,4 +277,4 @@ html <- c(html, "</tbody>");
 html <- c(html, "</table>");
 html <- c(html, "</body></html>");
 
-writeLines(html, paste(teamFullName, "History.html"));
+writeLines(html, paste0("output\\", gsub(" ", "", teamFullName), "History.html"));
