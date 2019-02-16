@@ -7,7 +7,7 @@ work with your favorite team or player.
 ### NHL Team History Table Maker
 This is an R script that creates an HTML table showing the key players from each season for an NHL team.  For purposes of this project, "key players" are defined by simply by the amount of time they spend on the ice.
 
-I've included (sample output)[/output/NashvillePredatorsHistory.html] for my favorite team, the Nashville Predators
+I've included (sample output)[output/NashvillePredatorsHistory.html] for my favorite team, the Nashville Predators
 
 ### Other Ideas
 There's always interesting analysis to be done with this data.  Here are some ideas I have:
