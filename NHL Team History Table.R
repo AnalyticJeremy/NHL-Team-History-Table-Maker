@@ -16,9 +16,6 @@ colors <- c("253,187,48", "0,45,98");   # Hard-coding the colors to use in the f
 source("nhl-r.R")
 library(reshape2);
 
-
-gameTypes <- buildGameTypes()
-
 ### Build a list of seasons for the specified team
 seasons <- getTeamSeasonSummaries(teamId)
 

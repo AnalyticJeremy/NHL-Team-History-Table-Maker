@@ -11,22 +11,17 @@ firstSeasonId <- "19171918";
 playerTypes <- c("skaters", "goalies");
 
 
-#------------------------------------------------------------------------------
-
-
 ### Build a dataframe of game types
 ### (this is static data that doesn't change)
 
 regularSeasonGameTypeId <- 2;
 playoffsGameTypeId <- 3;
 
-buildGameTypes <- function() {
-  data.frame(
+gameTypes <- data.frame(
     gameTypeId = c(regularSeasonGameTypeId, playoffsGameTypeId),
     name = c("Regular Season", "Playoffs"),
     stringsAsFactors = FALSE
   );
-}
 
 
 #------------------------------------------------------------------------------
@@ -80,6 +75,42 @@ computeStartYearForSeason <- function(seasonId) {
 #------------------------------------------------------------------------------
 
 
+# This function encodes a "x years and y days" description of a timespan
+# into a single integer.
+computeYearsAndDaysNumber <- function(d1, d2) {
+  d1 <- as.Date(d1);
+  d2 <- as.Date(d2);
+  
+  # We need to make sure that for each pair of dates, the day in d1 is EARLIER than its mate in d2
+  diffs <- as.integer(d2 - d1);
+  diffs <- ifelse(diffs > 0, 0, diffs)
+  d1 <- d1 + diffs
+  d2 <- d2 - diffs
+
+  year1 <- as.integer(format(d1, "%Y"));
+  year2 <- as.integer(format(d2, "%Y"));
+  years <- year2 - year1;
+  
+  dateInYear <- function(d, y) {
+    output <- paste0(y, format(d, "-%m-%d"));
+    output <- as.Date(ifelse(is.na(d), NA, output));
+  }
+  
+  d1y <- dateInYear(d1, year2);
+  diffs <- as.integer(d2 - d1y);
+  years <- ifelse(diffs < 0, years - 1, years)
+  d1y <- ifelse(diffs < 0, dateInYear(d1, year2 - 1), d1y);
+
+  days <- as.integer(d2 - d1y);
+  
+  #sprintf("%s years and %s days", years, days)
+  (years * 1000000) + days;
+}
+
+
+#------------------------------------------------------------------------------
+
+
 getDataFromNhlApi <- function(url, gameTypeId = NA) {
   output <- data.frame();
   jsonData <- fromJSON(url);
@@ -95,6 +126,12 @@ getDataFromNhlApi <- function(url, gameTypeId = NA) {
       jsonData$gameTypeId <- gameTypeId;
     }
 
+    if ("gameDate" %in% names(jsonData)) {
+      # Convert ISO-8601 date string to an R date object and convert the timezone
+      jsonData$gameDate <- as.POSIXct( strptime(jsonData$gameDate, "%Y-%m-%dT%H:%M:%SZ", tz="UTC") )
+      attr(jsonData$gameDate, "tzone") <- "America/Chicago"
+    }
+    
     output <- rbind(output, jsonData);
   }
 
