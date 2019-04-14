@@ -289,3 +289,20 @@ getPlayerGameDetails <- function(teamId, playerType = "skaters", startSeasonId =
 #------------------------------------------------------------------------------
 
 
+getPlayerHistory <- function(playerId, playerType = "skaters") {
+  reportName <- paste0(substr(playerType, 1, nchar(playerType) - 1), "summary");
+  
+  output <- lapply(gameTypes$gameTypeId, function(gameTypeId) {
+    requestUrl <- sprintf("%s%s?isAggregate=false&reportType=basic&isGame=true&reportName=%s&cayenneExp=gameTypeId=%s+and+playerId=%s", urlBase, playerType, reportName, gameTypeId, playerId);
+    getDataFromNhlApi(requestUrl, gameTypeId);
+  });
+  
+  output <- bind_rows(output);
+  
+  output$seasonId <- buildSeasonIdFromGameId(output$gameId)
+  
+  return(output);
+}
+
+
+#------------------------------------------------------------------------------
