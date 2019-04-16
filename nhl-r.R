@@ -178,6 +178,11 @@ getDataFromNhlApi <- function(apiMethod, params) {
                 } else {
                   jsonData <- jsonData$data;
                   
+                  # If there is no "seasonId" column, add it
+                  if ("gameId" %in% names(jsonData) & !"seasonId" %in% names(jsonData)) {
+                    jsonData$seasonId <- buildSeasonIdFromGameId(jsonData$gameId); 
+                  }
+                  
                   if ("seasonId" %in% names(jsonData)) {
                     jsonData$startYear <- as.integer(substr(jsonData$seasonId, 1, 4));
                   }

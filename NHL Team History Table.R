@@ -46,9 +46,6 @@ games <- getGameSummariesForTeam(teamId);
 skaterStats <- getPlayerGameDetails(teamId, "skaters");
 goalieStats <- getPlayerGameDetails(teamId, "goalies");
 
-skaterStats$seasonId <- buildSeasonIdFromGameId(skaterStats$gameId)
-goalieStats$seasonId <- buildSeasonIdFromGameId(goalieStats$gameId)
-
 
 ### Rename the "timeOnIcePerGame" column for skater stats so that it matches the column name for goalie stats
 columnNames <- names(skaterStats);
@@ -69,8 +66,6 @@ timeOnIce <- goalieStats %>%
 
 games <- merge(games, timeOnIce);
 games[games$timeOnIce < 3600, ]$timeOnIce <- 3600;
-
-games$seasonId <- buildSeasonIdFromGameId(games$gameId)
 
 
 
