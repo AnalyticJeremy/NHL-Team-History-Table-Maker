@@ -22,6 +22,7 @@ playerStats <- rbind(
   goalieStats %>% select_(.dots = columnNames)
 )
 
+playerStats$seasonId <- buildSeasonIdFromGameId(playerStats$gameId);
 playerStats$playerBirthDate <- as.Date(playerStats$playerBirthDate);
 playerStats$gameDate <- as.Date(playerStats$gameDate, tz = "America/Chicago");
 

@@ -19,6 +19,10 @@ library(reshape2);
 ### Build a list of seasons for the specified team
 seasons <- getTeamSeasonSummaries(teamId)
 
+seasons <- seasons %>%
+              group_by(seasonId) %>%
+              summarize(gamesPlayed = sum(gamesPlayed), goalsAgainst = sum(goalsAgainst), goalsFor = sum(goalsFor), losses = sum(losses), otLosses = sum(otLosses), points = sum(points), regPlusOtWins = sum(regPlusOtWins), shootoutGamesWon = sum(shootoutGamesWon), teamAbbrev = max(teamAbbrev), teamFullName = max(teamFullName), ties = sum(ties), wins = sum(wins), startYear = min(startYear))
+
 teamFullName <- seasons$teamFullName[nrow(seasons)];
 
 if (any(is.na(seasons$otLosses)) == TRUE) {
@@ -42,6 +46,9 @@ games <- getGameSummariesForTeam(teamId);
 skaterStats <- getPlayerGameDetails(teamId, "skaters");
 goalieStats <- getPlayerGameDetails(teamId, "goalies");
 
+skaterStats$seasonId <- buildSeasonIdFromGameId(skaterStats$gameId)
+goalieStats$seasonId <- buildSeasonIdFromGameId(goalieStats$gameId)
+
 
 ### Rename the "timeOnIcePerGame" column for skater stats so that it matches the column name for goalie stats
 columnNames <- names(skaterStats);
@@ -63,6 +70,7 @@ timeOnIce <- goalieStats %>%
 games <- merge(games, timeOnIce);
 games[games$timeOnIce < 3600, ]$timeOnIce <- 3600;
 
+games$seasonId <- buildSeasonIdFromGameId(games$gameId)
 
 
 

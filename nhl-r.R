@@ -6,7 +6,7 @@
 library(jsonlite);
 library(dplyr);
 
-urlBase <- "http://www.nhl.com/stats/rest/";
+apiUrlBase <- "http://www.nhl.com/stats/rest/";
 firstSeasonId <- "19171918";
 playerTypes <- c("skaters", "goalies");
 
@@ -18,10 +18,10 @@ regularSeasonGameTypeId <- 2;
 playoffsGameTypeId <- 3;
 
 gameTypes <- data.frame(
-    gameTypeId = c(regularSeasonGameTypeId, playoffsGameTypeId),
-    name = c("Regular Season", "Playoffs"),
-    stringsAsFactors = FALSE
-  );
+  gameTypeId = c(regularSeasonGameTypeId, playoffsGameTypeId),
+  name = c("Regular Season", "Playoffs"),
+  stringsAsFactors = FALSE
+);
 
 
 #------------------------------------------------------------------------------
@@ -50,7 +50,7 @@ computeSeasonIdForDate <- function(date = NA) {
   } else {
     date = as.Date(date);
   }
-
+  
   month <- suppressWarnings(as.integer(format(date, "%m")));
   year  <- suppressWarnings(as.integer(format(date, "%Y")));
   
@@ -86,7 +86,7 @@ computeYearsAndDaysNumber <- function(d1, d2) {
   diffs <- ifelse(diffs > 0, 0, diffs)
   d1 <- d1 + diffs
   d2 <- d2 - diffs
-
+  
   year1 <- as.integer(format(d1, "%Y"));
   year2 <- as.integer(format(d2, "%Y"));
   years <- year2 - year1;
@@ -100,7 +100,7 @@ computeYearsAndDaysNumber <- function(d1, d2) {
   diffs <- as.integer(d2 - d1y);
   years <- ifelse(diffs < 0, years - 1, years)
   d1y <- ifelse(diffs < 0, dateInYear(d1, year2 - 1), d1y);
-
+  
   days <- as.integer(d2 - d1y);
   
   #sprintf("%s years and %s days", years, days)
@@ -111,31 +111,93 @@ computeYearsAndDaysNumber <- function(d1, d2) {
 #------------------------------------------------------------------------------
 
 
-getDataFromNhlApi <- function(url, gameTypeId = NA) {
-  output <- data.frame();
-  jsonData <- fromJSON(url);
+playerTypeToSummaryReportName <- function(playerType) {
+  paste0(substr(playerType, 1, nchar(playerType) - 1), "summary")
+}
+
+
+#------------------------------------------------------------------------------
+
+
+paramsListToString <- function(params, collapse = "&") {
+  childLists <- params[sapply(params, is.list)]
+  params <- params[!sapply(params, is.list)]
   
-  if (jsonData$total > 0) {
-    jsonData <- jsonData$data;
-    
-    if ("seasonId" %in% names(jsonData)) {
-      jsonData$startYear <- as.integer(substr(jsonData$seasonId, 1, 4));
-    }
-    
-    if (!is.na(gameTypeId)) {
-      jsonData$gameTypeId <- gameTypeId;
-    }
-
-    if ("gameDate" %in% names(jsonData)) {
-      # Convert ISO-8601 date string to an R date object and convert the timezone
-      jsonData$gameDate <- as.POSIXct( strptime(jsonData$gameDate, "%Y-%m-%dT%H:%M:%SZ", tz="UTC") )
-      attr(jsonData$gameDate, "tzone") <- "America/Chicago"
-    }
-    
-    output <- rbind(output, jsonData);
+  if (length(childLists) > 0) {
+    params <- append(params, lapply(childLists, paramsListToString, collapse = "+and+") )
   }
+  
+  params <- expand.grid(params, stringsAsFactors = FALSE)
+  
+  queries <- c()
+  keys <- names(params)
+  for (i in 1:nrow(params)) {
+    values <- as.character(params[i, ])
+    query <- paste(keys, values, sep="=", collapse=collapse)
+    queries <- queries <- c(queries, query)
+  }
+  
+  queries
+}
 
-  return(output);
+
+#------------------------------------------------------------------------------
+
+
+buildUrls <- function(apiMethod, params) {
+  queryStrings <- paramsListToString(params)
+  urls <- sprintf("%s%s?%s", apiUrlBase, apiMethod, queryStrings)
+  urls <- unique(urls)
+  return(urls)
+}
+
+
+#------------------------------------------------------------------------------
+
+
+getGameTypeIdFromUrl <- function(url) {
+  pattern <- ".*gameTypeId=([0-9]+).*";
+  
+  output <- ifelse(grepl(pattern, url), gsub(pattern, "\\1", url), NA);
+  as.integer(output);
+}
+
+
+#------------------------------------------------------------------------------
+
+
+getDataFromNhlApi <- function(apiMethod, params) {
+  urls <- buildUrls(apiMethod, params);
+  
+  # Retrieve data for all of the URLs
+  jsonList <- lapply(urls, function(url) {
+                jsonData <- fromJSON(url)
+                
+                if (jsonData$total <= 0) {
+                  return(NULL)
+                } else {
+                  jsonData <- jsonData$data;
+                  
+                  if ("seasonId" %in% names(jsonData)) {
+                    jsonData$startYear <- as.integer(substr(jsonData$seasonId, 1, 4));
+                  }
+                  
+                  jsonData$gameTypeId <- getGameTypeIdFromUrl(url);
+                  
+                  if ("gameDate" %in% names(jsonData)) {
+                    # Convert ISO-8601 date string to an R date object and convert the timezone
+                    jsonData$gameDate <- as.POSIXct( strptime(jsonData$gameDate, "%Y-%m-%dT%H:%M:%SZ", tz="UTC") )
+                    attr(jsonData$gameDate, "tzone") <- "America/Chicago"
+                  }
+                  
+                  return(jsonData);
+                }
+              });
+  
+  # Remove any NULL entries from the list
+  jsonList <- jsonList[!sapply(jsonList, is.null)]
+  
+  return(bind_rows(jsonList));
 }
 
 
@@ -151,14 +213,26 @@ getTeamSeasonSummaries <- function(teamId, gameTypeId = NA, startSeasonId = NA, 
     endSeasonId = computeSeasonIdForDate();
   }
   
-  gameTypeFilter <- "";
-  if (!is.na(gameTypeId)) {
-    gameTypeFilter <- paste0("+and+gameTypeId=", gameTypeId);
+  if (is.na(gameTypeId)) {
+    gameTypeId = gameTypes$gameTypeId
   }
   
-  requestUrl <- sprintf("%steam?isAggregate=false&reportType=basic&isGame=false&reportName=teamsummary&cayenneExp=seasonId%%3E=%s+and+seasonId%%3C=%s+and+teamId=%s%s", urlBase, startSeasonId, endSeasonId, teamId, gameTypeFilter);
+  apiMethod <- "team"
   
-  getDataFromNhlApi(requestUrl, gameTypeId);
+  params <- list(
+    isAggregate = "false",
+    reportType = "basic",
+    isGame = "false",
+    reportName = "teamsummary",
+    cayenneExp = list(
+      "seasonId%3E" = startSeasonId,
+      "seasonId%3C" = endSeasonId,
+      "teamId" = teamId,
+      "gameTypeId" = gameTypeId
+    )
+  )
+  
+  getDataFromNhlApi(apiMethod, params);
 }
 
 
@@ -166,9 +240,16 @@ getTeamSeasonSummaries <- function(teamId, gameTypeId = NA, startSeasonId = NA, 
 
 
 getLeagueHistorySummary <- function() {
-  requestUrl <- sprintf("%steam?isAggregate=false&reportType=basic&isGame=false&reportName=teamsummary", urlBase);
+  apiMethod <- "team"
   
-  data <- getDataFromNhlApi(requestUrl);
+  params <- list(
+    isAggregate = "false",
+    reportType = "basic",
+    isGame = "false",
+    reportName = "teamsummary"
+  )
+  
+  data <- getDataFromNhlApi(apiMethod, params);
   
   latestSeason <- data %>% group_by(teamId) %>% summarize(seasonId = max(seasonId));
   latestSeason <- merge(latestSeason, data, by = c("teamId", "seasonId")) %>% select(teamId, teamAbbrev, teamFullName);
@@ -176,18 +257,18 @@ getLeagueHistorySummary <- function() {
   summary <- data %>%
     group_by(teamId) %>%
     summarize(gamesPlayed = sum(gamesPlayed),
-             goalsAgainst = sum(goalsAgainst),
-             goalsFor = sum(goalsFor),
-             wins = sum(wins),
-             losses = sum(losses),
-             ties = sum(ties, na.rm = TRUE),
-             otLosses = sum(otLosses, na.rm = TRUE),
-             points = sum(points),
-             shootoutGamesWon = sum(shootoutGamesWon),
-             seasons = n_distinct(seasonId),
-             firstSeason = min(seasonId),
-             latestSeason = max(seasonId),
-             names = n_distinct(teamFullName));
+              goalsAgainst = sum(goalsAgainst),
+              goalsFor = sum(goalsFor),
+              wins = sum(wins),
+              losses = sum(losses),
+              ties = sum(ties, na.rm = TRUE),
+              otLosses = sum(otLosses, na.rm = TRUE),
+              points = sum(points),
+              shootoutGamesWon = sum(shootoutGamesWon),
+              seasons = n_distinct(seasonId),
+              firstSeason = min(seasonId),
+              latestSeason = max(seasonId),
+              names = n_distinct(teamFullName));
   
   merge(latestSeason, summary, by = "teamId");
 }
@@ -201,21 +282,31 @@ getLeagueSeasonSummary <- function(seasonId = NA, gameTypeId = NA) {
     seasonId = computeSeasonIdForDate();
   }
   
-  gameTypeFilter <- "";
-  if (!is.na(gameTypeId)) {
-    gameTypeFilter <- paste0("+and+gameTypeId=", gameTypeId);
+  if (is.na(gameTypeId)) {
+    gameTypeId = gameTypes$gameTypeId
   }
   
-  requestUrl <- sprintf("%steam?isAggregate=false&reportType=basic&isGame=false&reportName=teamsummary&cayenneExp=seasonId=%s%s", urlBase, seasonId, gameTypeFilter);
+  apiMethod <- "team"
   
-  getDataFromNhlApi(requestUrl, gameTypeId);
+  params <- list(
+    isAggregate = "false",
+    reportType = "basic",
+    isGame = "false",
+    reportName = "teamsummary",
+    cayenneExp = list(
+      "seasonId" = seasonId,
+      "gameTypeId" = gameTypeId
+    )
+  )
+  
+  getDataFromNhlApi(apiMethod, params);
 }
 
 
 #------------------------------------------------------------------------------
 
 
-getTeamPlayersSummaryBySeason <- function(teamId, playerType = "skaters", startSeasonId = NA, endSeasonId = NA) {
+getTeamPlayersSummaryBySeason <- function(teamId, playerType = "skaters", startSeasonId = NA, endSeasonId = NA, gameTypeId = NA) {
   if (is.na(startSeasonId)) {
     startSeasonId = firstSeasonId;
   }
@@ -224,20 +315,33 @@ getTeamPlayersSummaryBySeason <- function(teamId, playerType = "skaters", startS
     endSeasonId = computeSeasonIdForDate();
   }
   
-  output <- lapply(gameTypes$gameTypeId, function(gameTypeId) {
-    requestUrl <- sprintf("%s%s?isAggregate=false&reportType=basic&isGame=false&reportName=skatersummary&cayenneExp=seasonId%%3E=%s+and+seasonId%%3C=%s+and+teamId=%s+and+gameTypeId=%s", urlBase, playerType, startSeasonId, endSeasonId, teamId, gameTypeId);
-    getDataFromNhlApi(requestUrl, gameTypeId);
-  });
+  if (is.na(gameTypeId)) {
+    gameTypeId = gameTypes$gameTypeId
+  }
   
-  output <- bind_rows(output);
-  return(output);
+  apiMethod <- playerType
+  
+  params <- list(
+    isAggregate = "false",
+    reportType = "basic",
+    isGame = "false",
+    reportName = playerTypeToSummaryReportName(playerType),
+    cayenneExp = list(
+      "seasonId%3E" = startSeasonId,
+      "seasonId%3C" = endSeasonId,
+      "teamId" = teamId,
+      "gameTypeId" = gameTypeId
+    )
+  )
+  
+  getDataFromNhlApi(apiMethod, params);
 }
 
 
 #------------------------------------------------------------------------------
 
 
-getGameSummariesForTeam <- function(teamId, startSeasonId = NA, endSeasonId = NA) {
+getGameSummariesForTeam <- function(teamId, startSeasonId = NA, endSeasonId = NA, gameTypeId = NA) {
   if (is.na(startSeasonId)) {
     startSeasonId = firstSeasonId;
   }
@@ -246,23 +350,33 @@ getGameSummariesForTeam <- function(teamId, startSeasonId = NA, endSeasonId = NA
     endSeasonId = computeSeasonIdForDate();
   }
   
-  output <- lapply(gameTypes$gameTypeId, function(gameTypeId) {
-    requestUrl <- sprintf("%steam?isAggregate=false&reportType=basic&isGame=true&reportName=teamsummary&cayenneExp=seasonId%%3E=%s+and+seasonId%%3C=%s+and+teamId=%s+and+gameTypeId=%s", urlBase, startSeasonId, endSeasonId, teamId, gameTypeId);
-    getDataFromNhlApi(requestUrl, gameTypeId);
-  });
+  if (is.na(gameTypeId)) {
+    gameTypeId = gameTypes$gameTypeId
+  }
   
-  output <- bind_rows(output);
+  apiMethod <- "team"
   
-  output$seasonId <- buildSeasonIdFromGameId(output$gameId)
+  params <- list(
+    isAggregate = "false",
+    reportType = "basic",
+    isGame = "true",
+    reportName = "teamsummary",
+    cayenneExp = list(
+      "seasonId%3E" = startSeasonId,
+      "seasonId%3C" = endSeasonId,
+      "teamId" = teamId,
+      "gameTypeId" = gameTypeId
+    )
+  )
   
-  return(output);
+  getDataFromNhlApi(apiMethod, params);
 }
 
 
 #------------------------------------------------------------------------------
 
 
-getPlayerGameDetails <- function(teamId, playerType = "skaters", startSeasonId = NA, endSeasonId = NA) {
+getPlayerGameDetails <- function(teamId, playerType = "skaters", startSeasonId = NA, endSeasonId = NA, gameTypeId = NA) {
   if (is.na(startSeasonId)) {
     startSeasonId = firstSeasonId;
   }
@@ -271,37 +385,51 @@ getPlayerGameDetails <- function(teamId, playerType = "skaters", startSeasonId =
     endSeasonId = computeSeasonIdForDate();
   }
   
-  reportName <- paste0(substr(playerType, 1, nchar(playerType) - 1), "summary");
+  if (is.na(gameTypeId)) {
+    gameTypeId = gameTypes$gameTypeId
+  }
   
-  output <- lapply(gameTypes$gameTypeId, function(gameTypeId) {
-    requestUrl <- sprintf("%s%s?isAggregate=false&reportType=basic&isGame=true&reportName=%s&cayenneExp=seasonId%%3E=%s+and+seasonId%%3C=%s+and+gameTypeId=%s+and+teamId=%s", urlBase, playerType, reportName, startSeasonId, endSeasonId, gameTypeId, teamId);
-    getDataFromNhlApi(requestUrl, gameTypeId);
-  });
+  apiMethod <- playerType
   
-  output <- bind_rows(output);
+  params <- list(
+    isAggregate = "false",
+    reportType = "basic",
+    isGame = "true",
+    reportName = playerTypeToSummaryReportName(playerType),
+    cayenneExp = list(
+      "seasonId%3E" = startSeasonId,
+      "seasonId%3C" = endSeasonId,
+      "teamId" = teamId,
+      "gameTypeId" = gameTypeId
+    )
+  )
   
-  output$seasonId <- buildSeasonIdFromGameId(output$gameId)
-  
-  return(output);
+  getDataFromNhlApi(apiMethod, params);
 }
 
 
 #------------------------------------------------------------------------------
 
 
-getPlayerHistory <- function(playerId, playerType = "skaters") {
-  reportName <- paste0(substr(playerType, 1, nchar(playerType) - 1), "summary");
+getPlayerHistory <- function(playerId, playerType = "skaters", gameTypeId = NA) {
+  if (is.na(gameTypeId)) {
+    gameTypeId = gameTypes$gameTypeId
+  }
   
-  output <- lapply(gameTypes$gameTypeId, function(gameTypeId) {
-    requestUrl <- sprintf("%s%s?isAggregate=false&reportType=basic&isGame=true&reportName=%s&cayenneExp=gameTypeId=%s+and+playerId=%s", urlBase, playerType, reportName, gameTypeId, playerId);
-    getDataFromNhlApi(requestUrl, gameTypeId);
-  });
+  apiMethod <- playerType
   
-  output <- bind_rows(output);
+  params <- list(
+    isAggregate = "false",
+    reportType = "basic",
+    isGame = "true",
+    reportName = playerTypeToSummaryReportName(playerType),
+    cayenneExp = list(
+      "playerId" = playerId,
+      "gameTypeId" = gameTypeId
+    )
+  )
   
-  output$seasonId <- buildSeasonIdFromGameId(output$gameId)
-  
-  return(output);
+  getDataFromNhlApi(apiMethod, params);
 }
 
 
