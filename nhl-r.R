@@ -282,6 +282,45 @@ getLeagueHistorySummary <- function() {
 #------------------------------------------------------------------------------
 
 
+getFranchiseHistorySummary <- function(gameTypeId = NA, startSeasonId = NA, endSeasonId = NA) {
+  if (is.na(startSeasonId)) {
+    startSeasonId = firstSeasonId;
+  }
+  
+  if (is.na(endSeasonId)) {
+    endSeasonId = computeSeasonIdForDate();
+  }
+  
+  if (is.na(gameTypeId)) {
+    gameTypeId = gameTypes$gameTypeId
+  }
+  
+  apiMethod <- "team"
+  
+  params <- list(
+    isAggregate = "true",
+    reportType = "season",
+    isGame = "false",
+    reportName = "franchisesummary",
+    cayenneExp = list(
+      "seasonId%3E" = startSeasonId,
+      "seasonId%3C" = endSeasonId,
+      "gameTypeId" = gameTypeId
+    )
+  )
+  
+  data <- getDataFromNhlApi(apiMethod, params);
+
+  data$winRate <- data$wins / data$gamesPlayed;
+  data$pointsRate <- data$points / data$gamesPlayed;
+  
+  return(data);
+}
+
+
+#------------------------------------------------------------------------------
+
+
 getLeagueSeasonSummary <- function(seasonId = NA, gameTypeId = NA) {
   if (is.na(seasonId)) {
     seasonId = computeSeasonIdForDate();
